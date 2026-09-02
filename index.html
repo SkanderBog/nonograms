@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nonograms</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1e2128;
+    --cell-bg: #262b35;
+    --cell-border: #3a4150;
+    --filled: #4f8cff;
+    --mark-x: #8a93a5;
+    --wrong: #e5484d;
+    --text: #e8e8e8;
+    --muted: #8a93a5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 8px 30px;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 10px;
+  }
+  h1 { font-size: 17px; margin: 0 10px 0 0; font-weight: 600; letter-spacing: .4px; }
+  button, label.btn {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--cell-border);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover, label.btn:hover { border-color: var(--filled); }
+  button.primary { background: #2b5fd9; border-color: #2b5fd9; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.12); }
+  button:disabled { opacity: .55; cursor: default; }
+  select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--cell-border);
+    border-radius: 7px;
+    padding: 6px 8px;
+    font-size: 13px;
+    max-width: 160px;
+  }
+  #meta { color: var(--muted); font-size: 12.5px; text-align: center; min-height: 18px; margin-bottom: 12px; }
+  #status { color: var(--muted); font-size: 13px; min-height: 18px; }
+  #banner {
+    display: none;
+    margin-top: 14px;
+    padding: 10px 26px;
+    background: #1f6f43;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .grid { display: grid; gap: 0; user-select: none; -webkit-user-select: none; }
+  .corner { background: transparent; }
+  .cell {
+    width: var(--cell);
+    height: var(--cell);
+    background: var(--cell-bg);
+    border: 1px solid var(--cell-border);
+    cursor: pointer;
+    position: relative;
+  }
+  .cell:hover { background: #2e3647; }
+  .cell.filled { background: var(--filled); }
+  .cell.marked::after {
+    content: "✕";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--mark-x);
+    font-size: calc(var(--cell) * 0.55);
+  }
+  .cell.wrong { background: var(--wrong); }
+  .cell.thick-right { border-right-width: 2px; border-right-color: #55617a; }
+  .cell.thick-bottom { border-bottom-width: 2px; border-bottom-color: #55617a; }
+  .clue {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--muted);
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+  }
+  .row-clue { justify-content: flex-end; padding-right: 7px; }
+  .col-clue {
+    flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 4px;
+    align-items: center;
+  }
+  .clue.done { color: #54b86c; text-decoration: line-through; }
+  @media (max-width: 600px) {
+    button, label.btn { padding: 5px 9px; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Nonograms</h1>
+  <select id="size" title="Grid size">
+    <option value="10" selected>10×10</option>
+    <option value="15">15×15</option>
+    <option value="20">20×20</option>
+    <option value="25">25×25</option>
+    <option value="30">30×30</option>
+  </select>
+  <select id="pattern" title="Picture style">
+    <option value="auto" selected>auto</option>
+    <option value="symmetric">symmetric</option>
+    <option value="blobs">blobs</option>
+    <option value="shapes">shapes</option>
+    <option value="diagonal">diagonal</option>
+    <option value="checker">checker</option>
+  </select>
+  <select id="difficulty" title="Minimum difficulty">
+    <option value="Easy" selected>Easy +</option>
+    <option value="Medium">Medium +</option>
+    <option value="Hard">Hard only</option>
+  </select>
+  <button id="new" class="primary" title="Generate a fresh puzzle">New puzzle</button>
+  <button id="mode" title="Left click: fill or mark">Mode: fill</button>
+  <button id="check">Check</button>
+  <button id="clear">Clear</button>
+</header>
+<div id="meta"></div>
+<div id="board"></div>
+<div id="banner">🎉 Solved!</div>
+<div id="status"></div>
+<script src="bundle.js"></script>
+<script>
+'use strict';
+
+const boardEl = document.getElementById('board');
+const metaEl = document.getElementById('meta');
+const statusEl = document.getElementById('status');
+const bannerEl = document.getElementById('banner');
+const modeBtn = document.getElementById('mode');
+const newBtn = document.getElementById('new');
+const sizeEl = document.getElementById('size');
+const patternEl = document.getElementById('pattern');
+const diffEl = document.getElementById('difficulty');
+
+let P = null;      // { width, height, rowClues, colClues, solution, ...meta }
+let state = [];    // 0 unknown, 1 filled, 2 marked
+let wrong = null;  // null | Set of "r,c"
+let markMode = false;
+let solved = false;
+
+function load(puzzle) {
+  P = {
+    width: puzzle.width,
+    height: puzzle.height,
+    rowClues: puzzle.rowClues ?? puzzle.clues?.rows,
+    colClues: puzzle.colClues ?? puzzle.clues?.cols,
+    solution: puzzle.solution ?? null,
+    difficulty: puzzle.difficulty,
+    pattern: puzzle.pattern,
+    seed: puzzle.seed,
+  };
+  state = Array.from({ length: P.height }, () => new Array(P.width).fill(0));
+  wrong = null;
+  solved = false;
+  bannerEl.style.display = 'none';
+  render();
+}
+
+// ------------------------------------------------------------------ render
+function render() {
+  const maxCol = Math.max(1, ...P.colClues.map((c) => c.length));
+  const maxRow = Math.max(1, ...P.rowClues.map((c) => c.length));
+  const cell = Math.max(16, Math.min(30, Math.floor(Math.min(
+    (window.innerWidth - 120) / P.width,
+    (window.innerHeight - 200) / P.height
+  ))));
+  boardEl.innerHTML = '';
+  boardEl.classList.add('grid');
+  boardEl.style.setProperty('--cell', cell + 'px');
+  boardEl.style.gridTemplateColumns = `${maxRow * 15 + 10}px repeat(${P.width}, ${cell}px)`;
+  boardEl.style.gridTemplateRows = `${maxCol * 16 + 8}px repeat(${P.height}, ${cell}px)`;
+
+  boardEl.appendChild(div('corner'));
+  for (let c = 0; c < P.width; c++) {
+    const el = div('clue col-clue');
+    el.dataset.col = c;
+    for (const v of P.colClues[c]) {
+      const n = div('clue-num');
+      n.textContent = v;
+      el.appendChild(n);
+    }
+    boardEl.appendChild(el);
+  }
+  for (let r = 0; r < P.height; r++) {
+    const el = div('clue row-clue');
+    el.dataset.row = r;
+    for (const v of P.rowClues[r]) {
+      const n = div('clue-num');
+      n.textContent = v;
+      el.appendChild(n);
+    }
+    boardEl.appendChild(el);
+    for (let c = 0; c < P.width; c++) {
+      const cellEl = div('cell');
+      cellEl.dataset.r = r;
+      cellEl.dataset.c = c;
+      if ((c + 1) % 5 === 0) cellEl.classList.add('thick-right');
+      if ((r + 1) % 5 === 0) cellEl.classList.add('thick-bottom');
+      cellEl.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        toggle(r, c, ev.button === 2 || ev.shiftKey);
+      });
+      cellEl.addEventListener('contextmenu', (ev) => ev.preventDefault());
+      boardEl.appendChild(cellEl);
+    }
+  }
+  metaEl.textContent =
+    `${P.width}×${P.height}` +
+    (P.difficulty ? ` · ${P.difficulty}` : '') +
+    (P.pattern ? ` · ${P.pattern}` : '') +
+    (P.seed !== undefined ? ` · seed ${P.seed}` : '');
+  statusEl.textContent = '';
+  update();
+}
+
+function div(cls) {
+  const el = document.createElement('div');
+  el.className = cls;
+  return el;
+}
+
+// ------------------------------------------------------------------- game
+function toggle(r, c, asMark) {
+  if (solved) return;
+  if (markMode) asMark = !asMark;
+  const v = state[r][c];
+  if (asMark) state[r][c] = v === 2 ? 0 : 2;
+  else state[r][c] = v === 1 ? 0 : 1;
+  wrong = null;
+  update();
+}
+
+function runsOf(line) {
+  const out = [];
+  let run = 0;
+  for (const v of line) {
+    if (v === 1) run++;
+    else if (run) { out.push(run); run = 0; }
+  }
+  if (run) out.push(run);
+  return out;
+}
+
+function sameClues(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+function colState(c) {
+  const out = [];
+  for (let r = 0; r < P.height; r++) out.push(state[r][c]);
+  return out;
+}
+
+function update() {
+  const cells = boardEl.querySelectorAll('.cell');
+  for (const el of cells) {
+    const r = +el.dataset.r;
+    const c = +el.dataset.c;
+    el.classList.toggle('filled', state[r][c] === 1);
+    el.classList.toggle('marked', state[r][c] === 2);
+    el.classList.toggle('wrong', wrong !== null && wrong.has(r + ',' + c));
+  }
+  const rowClues = boardEl.querySelectorAll('.row-clue');
+  rowClues.forEach((el) => {
+    el.classList.toggle('done', sameClues(runsOf(state[+el.dataset.row]), P.rowClues[+el.dataset.row]));
+  });
+  const colClues = boardEl.querySelectorAll('.col-clue');
+  colClues.forEach((el) => {
+    el.classList.toggle('done', sameClues(runsOf(colState(+el.dataset.col)), P.colClues[+el.dataset.col]));
+  });
+  checkWin();
+}
+
+function checkWin() {
+  if (solved) return;
+  let won;
+  if (P.solution) {
+    won = P.solution.every((row, r) => row.every((v, c) => (state[r][c] === 1) === (v === 1)));
+  } else {
+    const decided = state.every((row) => row.every((v) => v !== 0));
+    const rowsOk = P.rowClues.every((cl, r) => sameClues(runsOf(state[r]), cl));
+    const colsOk = P.colClues.every((cl, c) => sameClues(runsOf(colState(c)), cl));
+    won = decided && rowsOk && colsOk;
+  }
+  if (won) {
+    solved = true;
+    bannerEl.style.display = 'block';
+    statusEl.textContent = '';
+  }
+}
+
+function doCheck() {
+  if (!P.solution) {
+    statusEl.textContent = 'No solution embedded — the win check is clue-based.';
+    return;
+  }
+  const w = new Set();
+  let missing = 0;
+  for (let r = 0; r < P.height; r++) {
+    for (let c = 0; c < P.width; c++) {
+      if (P.solution[r][c] === 1 && state[r][c] !== 1) missing++;
+      if (state[r][c] === 1 && P.solution[r][c] === 0) w.add(r + ',' + c);
+    }
+  }
+  wrong = w;
+  update();
+  statusEl.textContent = w.size === 0 && missing === 0
+    ? 'All correct!'
+    : `${w.size} wrong fill${w.size === 1 ? '' : 's'}, ${missing} missing cell${missing === 1 ? '' : 's'}.`;
+}
+
+function doClear() {
+  state = Array.from({ length: P.height }, () => new Array(P.width).fill(0));
+  wrong = null;
+  solved = false;
+  bannerEl.style.display = 'none';
+  statusEl.textContent = '';
+  update();
+}
+
+// -------------------------------------------------------------- generation
+function newPuzzle() {
+  newBtn.disabled = true;
+  statusEl.textContent = 'generating…';
+  // Yield to the UI so "generating…" paints before the (synchronous) search.
+  setTimeout(() => {
+    try {
+      const size = +sizeEl.value;
+      const p = generatePuzzle({
+        width: size,
+        height: size,
+        pattern: patternEl.value,
+        minDifficulty: diffEl.value,
+        maxDifficulty: 'Hard',
+        maxSolutions: 1,
+      });
+      if (!p) {
+        statusEl.textContent = "Couldn't generate a puzzle — try a different size or difficulty.";
+      } else {
+        load(p);
+      }
+    } finally {
+      newBtn.disabled = false;
+    }
+  }, 30);
+}
+
+modeBtn.addEventListener('click', () => {
+  markMode = !markMode;
+  modeBtn.textContent = markMode ? 'Mode: mark' : 'Mode: fill';
+});
+document.getElementById('check').addEventListener('click', doCheck);
+document.getElementById('clear').addEventListener('click', doClear);
+newBtn.addEventListener('click', newPuzzle);
+
+newPuzzle();
+</script>
+</body>
+</html>

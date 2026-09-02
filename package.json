@@ -1,0 +1,14 @@
+{
+  "name": "nonograms",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Instant, unique, non-trivial nonogram puzzles — generate in the browser or from the CLI",
+  "scripts": {
+    "gen": "node generator.js",
+    "build": "node build.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
