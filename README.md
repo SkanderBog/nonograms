@@ -9,7 +9,7 @@ actual thinking (Easy, Medium, or Hard — never Trivial).
 
 - **Open `index.html` directly** (double-click it, or `python3 -m http.server`
   then visit `http://localhost:8080`). It works either way.
-- Pick a size (5×5 … 30×30), a picture style, and a minimum difficulty, then
+- Pick a size (10×10 … 30×30), a picture style, and a minimum difficulty, then
   **New puzzle**.
 - Left-click fills a cell, right-click (or Shift-click) marks it. **Mode** swaps
   the left-click action. **Check** compares against the hidden solution;
