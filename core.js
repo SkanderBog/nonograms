@@ -162,10 +162,17 @@ export function parseTextPuzzle(text) {
   const lines = text
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l !== '' && !l.startsWith('#'));
+    .filter((l) => !l.startsWith('#'));
+  // Blank clue records are meaningful. Only skip blanks before the header.
+  while (lines.length && lines[0] === '') lines.shift();
+  if (!lines.length) throw new Error('missing puzzle header');
   const head = lines[0].split(/\s+/).map(Number);
   const width = head[0];
   const height = head[1];
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new Error('puzzle dimensions must be positive integers');
+  }
+  if (lines.length < 1 + height + width) throw new Error('missing clue records');
   const readClues = (line) =>
     line === undefined || line === '' ? [] : line.split(/\s+/).map(Number).filter((v) => v > 0);
   const rowClues = [];
@@ -189,7 +196,7 @@ export function parsePuzzle(text) {
       colClues,
     };
   }
-  return parseTextPuzzle(t);
+  return parseTextPuzzle(text);
 }
 
 // Minimal --flag parsing shared by the CLIs.

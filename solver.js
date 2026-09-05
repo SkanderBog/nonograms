@@ -227,8 +227,8 @@ export function solvePuzzle(puzzle, opts = {}) {
       if (best.v !== null) {
         let ones = 0;
         // Bit of cell i inside the line's mask: 1<<i works for rows; for a
-        // column line the mask is indexed by row, so the bit is 1<<idx.
-        const bit = best.kind === 'row' ? 1n << BigInt(i) : 1n << BigInt(best.idx);
+        // column line the candidate i is a row index, so it is also 1<<i.
+        const bit = 1n << BigInt(i);
         for (const mk of best.v) if (mk & bit) ones++;
         skew = Math.abs(2 * ones - best.v.length);
       }

@@ -320,6 +320,7 @@ function checkWin() {
 }
 
 function doCheck() {
+  if (!P) return;
   if (!P.solution) {
     statusEl.textContent = 'No solution embedded — the win check is clue-based.';
     return;
@@ -340,6 +341,7 @@ function doCheck() {
 }
 
 function doClear() {
+  if (!P) return;
   state = Array.from({ length: P.height }, () => new Array(P.width).fill(0));
   wrong = null;
   solved = false;
@@ -369,6 +371,9 @@ function newPuzzle() {
       } else {
         load(p);
       }
+    } catch (error) {
+      statusEl.textContent = 'Generation failed — try another size or difficulty.';
+      console.error(error);
     } finally {
       newBtn.disabled = false;
     }

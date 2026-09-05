@@ -51,5 +51,12 @@ const bundle = [
   '',
 ].join('\n');
 
-writeFileSync(join(here, 'bundle.js'), bundle);
-console.log('bundle.js written');
+if (process.argv.includes('--check')) {
+  if (read('bundle.js') !== bundle) {
+    throw new Error('bundle.js is stale; run npm run build');
+  }
+  console.log('bundle.js is current');
+} else {
+  writeFileSync(join(here, 'bundle.js'), bundle);
+  console.log('bundle.js written');
+}

@@ -3,10 +3,11 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Instant, unique, non-trivial nonogram puzzles — generate in the browser or from the CLI",
+  "description": "Verified nonogram puzzles — generate in the browser or from the CLI",
   "scripts": {
     "gen": "node generator.js",
-    "build": "node build.js"
+    "build": "node build.js",
+    "test": "node build.js --check && node tests.js"
   },
   "engines": {
     "node": ">=18"

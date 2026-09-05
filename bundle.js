@@ -166,10 +166,17 @@ function parseTextPuzzle(text) {
   const lines = text
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l !== '' && !l.startsWith('#'));
+    .filter((l) => !l.startsWith('#'));
+  // Blank clue records are meaningful. Only skip blanks before the header.
+  while (lines.length && lines[0] === '') lines.shift();
+  if (!lines.length) throw new Error('missing puzzle header');
   const head = lines[0].split(/\s+/).map(Number);
   const width = head[0];
   const height = head[1];
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new Error('puzzle dimensions must be positive integers');
+  }
+  if (lines.length < 1 + height + width) throw new Error('missing clue records');
   const readClues = (line) =>
     line === undefined || line === '' ? [] : line.split(/\s+/).map(Number).filter((v) => v > 0);
   const rowClues = [];
@@ -193,7 +200,7 @@ function parsePuzzle(text) {
       colClues,
     };
   }
-  return parseTextPuzzle(t);
+  return parseTextPuzzle(text);
 }
 
 // Minimal --flag parsing shared by the CLIs.
@@ -446,8 +453,8 @@ function solvePuzzle(puzzle, opts = {}) {
       if (best.v !== null) {
         let ones = 0;
         // Bit of cell i inside the line's mask: 1<<i works for rows; for a
-        // column line the mask is indexed by row, so the bit is 1<<idx.
-        const bit = best.kind === 'row' ? 1n << BigInt(i) : 1n << BigInt(best.idx);
+        // column line the candidate i is a row index, so it is also 1<<i.
+        const bit = 1n << BigInt(i);
         for (const mk of best.v) if (mk & bit) ones++;
         skew = Math.abs(2 * ones - best.v.length);
       }
@@ -519,20 +526,20 @@ function solvePuzzle(puzzle, opts = {}) {
 
 // ---------------------------------------------------------------------------
 
-// generator.js — instantly creates nonogram puzzles with a few solutions
-// (unique by default) that are fun to play. CLI included.
+// generator.js — creates verified nonogram puzzles with a few solutions
+// (unique by default) within an attempt budget. CLI included.
 //
 // How it works:
 //   1. Draw a structured random picture (symmetric blobs, blobs, diagonal
 //      stripes or checkerboard) with a healthy fill ratio.
 //   2. Derive the row/column clues from the picture.
-//   3. Prove the solution count with the solver. If rivals exist, flip one
-//      cell where the picture disagrees with a found rival and re-prove —
-//      this drives the puzzle toward uniqueness very quickly.
+//   3. Prove the solution count with the solver. If rivals exist, flip up to
+//      three cells where the picture disagrees with a rival and re-check.
+//      This heuristic may help, but need not converge.
 //   4. Accept the puzzle only if its difficulty (how far pure line solving
 //      gets + how much search the uniqueness proof needed) is in range.
 //   5. Redraw if a candidate cannot be fixed within the attempt budget.
-// Seeded (--seed), so every puzzle is reproducible.
+// Seeded (--seed); budget cutoffs can still vary by machine speed.
 
 
 
@@ -542,11 +549,9 @@ function solvePuzzle(puzzle, opts = {}) {
 
 const DIFFICULTIES = ['Trivial', 'Easy', 'Medium', 'Hard', 'Expert'];
 
-// How hard a puzzle feels for a human, estimated from how the uniqueness
-// proof went: how much branching the solver needed (a proxy for the
-// lookahead a human needs), and whether pure line-solving alone solves it.
-// Thresholds scale with the cell count — a 20x20 that needs 100 branch nodes
-// is easy, a 5x5 that needs 100 is brutal.
+// A solver-work heuristic, not a calibrated measure of human difficulty.
+// Thresholds scale branch-node counts with the cell count. The first argument
+// is retained for callers; the current classifier uses only nodes and cells.
 function classifyDifficulty(lineSolvablePercent, nodes, cells = 100) {
   const scale = Math.max(1, cells / 100);
   if (nodes <= 1) {
@@ -710,9 +715,8 @@ const PATTERNS = {
   checker: makeChecker,
 };
 
-// Large diagonal-stripe puzzles are genuinely Expert-class (their uniqueness
-// is slow to prove and they need lots of human lookahead), so "auto" avoids
-// them above 256 cells. They remain available by explicit --pattern.
+// Large diagonal-stripe puzzles can be slow to verify, so "auto" avoids them
+// from 256 cells onward. They remain available by explicit --pattern.
 const AUTO_PATTERNS = ['symmetric', 'blobs', 'shapes', 'checker'];
 const AUTO_PATTERNS_SMALL = ['symmetric', 'blobs', 'shapes', 'diagonal', 'checker'];
 
@@ -756,13 +760,15 @@ function generatePuzzle(opts = {}) {
         { maxSolutions: allowed + 1, timeBudgetMs: verifyMs }
       );
       if (res.timedOut) break; // uniqueness unprovable within budget → redraw
-      if (res.solutions.length <= allowed) {
+      if (!res.truncated && res.solutions.length <= allowed) {
         const diff = classifyDifficulty(res.lineSolvablePercent, res.nodes, width * height);
         const di = DIFFICULTIES.indexOf(diff);
         const inRange =
           (minDiff === null || di >= DIFFICULTIES.indexOf(minDiff)) &&
           (maxDiff === null || di <= DIFFICULTIES.indexOf(maxDiff));
-        if (inRange && res.solutions.some((s) => s.every((row, r) => row === rows[r]))) {
+        const ratio = fillRatio(rows, width, height);
+        if (inRange && ratio >= minFill && ratio <= maxFill &&
+            res.solutions.some((s) => s.every((row, r) => row === rows[r]))) {
           return {
             width,
             height,
@@ -781,11 +787,10 @@ function generatePuzzle(opts = {}) {
             generatedAt: new Date().toISOString(),
           };
         }
-        break; // unique but wrong difficulty → redraw
+        break; // verified count but outside the requested filters → redraw
       }
       // Rivals exist: flip a few cells where the picture disagrees with a
-      // rival — killing several rival solutions at once converges faster
-      // than flipping a single cell.
+      // rival. Recompute all clues afterward; a flip may introduce new rivals.
       const rival = res.solutions.find((s) => s.some((row, r) => row !== rows[r]));
       if (!rival) break;
       const diffs = [];

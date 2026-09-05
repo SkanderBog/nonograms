@@ -1,17 +1,17 @@
-// generator.js — instantly creates nonogram puzzles with a few solutions
-// (unique by default) that are fun to play. CLI included.
+// generator.js — creates verified nonogram puzzles with a few solutions
+// (unique by default) within an attempt budget. CLI included.
 //
 // How it works:
 //   1. Draw a structured random picture (symmetric blobs, blobs, diagonal
 //      stripes or checkerboard) with a healthy fill ratio.
 //   2. Derive the row/column clues from the picture.
-//   3. Prove the solution count with the solver. If rivals exist, flip one
-//      cell where the picture disagrees with a found rival and re-prove —
-//      this drives the puzzle toward uniqueness very quickly.
+//   3. Prove the solution count with the solver. If rivals exist, flip up to
+//      three cells where the picture disagrees with a rival and re-check.
+//      This heuristic may help, but need not converge.
 //   4. Accept the puzzle only if its difficulty (how far pure line solving
 //      gets + how much search the uniqueness proof needed) is in range.
 //   5. Redraw if a candidate cannot be fixed within the attempt budget.
-// Seeded (--seed), so every puzzle is reproducible.
+// Seeded (--seed); budget cutoffs can still vary by machine speed.
 
 import {
   cluesFromGrid,
@@ -30,11 +30,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 export const DIFFICULTIES = ['Trivial', 'Easy', 'Medium', 'Hard', 'Expert'];
 
-// How hard a puzzle feels for a human, estimated from how the uniqueness
-// proof went: how much branching the solver needed (a proxy for the
-// lookahead a human needs), and whether pure line-solving alone solves it.
-// Thresholds scale with the cell count — a 20x20 that needs 100 branch nodes
-// is easy, a 5x5 that needs 100 is brutal.
+// A solver-work heuristic, not a calibrated measure of human difficulty.
+// Thresholds scale branch-node counts with the cell count. The first argument
+// is retained for callers; the current classifier uses only nodes and cells.
 export function classifyDifficulty(lineSolvablePercent, nodes, cells = 100) {
   const scale = Math.max(1, cells / 100);
   if (nodes <= 1) {
@@ -198,9 +196,8 @@ export const PATTERNS = {
   checker: makeChecker,
 };
 
-// Large diagonal-stripe puzzles are genuinely Expert-class (their uniqueness
-// is slow to prove and they need lots of human lookahead), so "auto" avoids
-// them above 256 cells. They remain available by explicit --pattern.
+// Large diagonal-stripe puzzles can be slow to verify, so "auto" avoids them
+// from 256 cells onward. They remain available by explicit --pattern.
 const AUTO_PATTERNS = ['symmetric', 'blobs', 'shapes', 'checker'];
 const AUTO_PATTERNS_SMALL = ['symmetric', 'blobs', 'shapes', 'diagonal', 'checker'];
 
@@ -244,13 +241,15 @@ export function generatePuzzle(opts = {}) {
         { maxSolutions: allowed + 1, timeBudgetMs: verifyMs }
       );
       if (res.timedOut) break; // uniqueness unprovable within budget → redraw
-      if (res.solutions.length <= allowed) {
+      if (!res.truncated && res.solutions.length <= allowed) {
         const diff = classifyDifficulty(res.lineSolvablePercent, res.nodes, width * height);
         const di = DIFFICULTIES.indexOf(diff);
         const inRange =
           (minDiff === null || di >= DIFFICULTIES.indexOf(minDiff)) &&
           (maxDiff === null || di <= DIFFICULTIES.indexOf(maxDiff));
-        if (inRange && res.solutions.some((s) => s.every((row, r) => row === rows[r]))) {
+        const ratio = fillRatio(rows, width, height);
+        if (inRange && ratio >= minFill && ratio <= maxFill &&
+            res.solutions.some((s) => s.every((row, r) => row === rows[r]))) {
           return {
             width,
             height,
@@ -269,11 +268,10 @@ export function generatePuzzle(opts = {}) {
             generatedAt: new Date().toISOString(),
           };
         }
-        break; // unique but wrong difficulty → redraw
+        break; // verified count but outside the requested filters → redraw
       }
       // Rivals exist: flip a few cells where the picture disagrees with a
-      // rival — killing several rival solutions at once converges faster
-      // than flipping a single cell.
+      // rival. Recompute all clues afterward; a flip may introduce new rivals.
       const rival = res.solutions.find((s) => s.some((row, r) => row !== rows[r]));
       if (!rival) break;
       const diffs = [];
@@ -307,11 +305,10 @@ export function generatePuzzle(opts = {}) {
 // ---------------------------------------------------------------------------
 const HELP = `Usage: node generator.js [options]
 
-Generates nonogram puzzles instantly: a structured random picture is turned
-into clues, the solver proves the puzzle has only the requested number of
-solutions ("few" — unique by default), and a difficulty filter keeps only
-puzzles that are fun (not trivial, not brutal). Every puzzle is written to
-puzzles/ as JSON and printed to the terminal.
+Generates nonogram puzzles within an attempt budget. A structured random
+picture is turned into clues, the solver verifies the solution count (unique
+by default), and a solver-work difficulty filter selects candidates. A search
+may fail to find a puzzle. Each accepted puzzle is saved as JSON and printed.
 
 Options:
   --size W[xH]       grid size (default 10; e.g. 10 or 15x10)
@@ -364,6 +361,7 @@ function main() {
     process.exit(1);
   }
   const count = args.count ?? 1;
+  const small = Math.min(width, height) < 10;
   const outDir = args.output ? String(args.output) : join(HERE, 'puzzles');
   const made = [];
   const t0 = Date.now();
@@ -374,7 +372,7 @@ function main() {
       pattern: args.pattern ?? 'auto',
       seed: args.seed !== undefined ? Number(args.seed) + i : undefined,
       maxSolutions: args['max-solutions'] ?? 1,
-      minDifficulty: args['min-difficulty'] ?? 'Easy',
+      minDifficulty: args['min-difficulty'] ?? (small ? 'Trivial' : 'Easy'),
       maxDifficulty: args['max-difficulty'] ?? 'Hard',
       minFill: args['min-fill'] !== undefined ? Number(args['min-fill']) : undefined,
       maxFill: args['max-fill'] !== undefined ? Number(args['max-fill']) : undefined,

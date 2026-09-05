@@ -1,13 +1,14 @@
 # Nonograms
 
-Instant, *unique*, *non-trivial* nonogram puzzles. Open **`index.html`** in any
-browser (no build step, no server) and click **New puzzle** — a fresh puzzle is
-generated on the spot, guaranteed to have exactly one solution and to need some
-actual thinking (Easy, Medium, or Hard — never Trivial).
+Nonogram puzzles generated and solved locally. Open **`index.html`** in a modern
+browser (no build step, no server) and click **New puzzle**. Every accepted game
+puzzle has exactly one verified solution and an Easy, Medium, or Hard label.
+Those labels describe solver work; they are not calibrated human difficulty.
+Some size/style/difficulty combinations may exhaust the generation budget.
 
 ## Play
 
-- **Open `index.html` directly** (double-click it, or `python3 -m http.server`
+- **Open `index.html` directly** (double-click it, or `python3 -m http.server 8080`
   then visit `http://localhost:8080`). It works either way.
 - Pick a size (10×10 … 30×30), a picture style, and a minimum difficulty, then
   **New puzzle**.
@@ -24,15 +25,19 @@ Every puzzle is generated from a structured random picture:
 1. Draw a picture (symmetric blobs, blobs, Mondrian "shapes", diagonal stripes,
    or checkerboard).
 2. Derive the row/column clues from it.
-3. **Vet** the clues with an exhaustive solver — if a rival solution exists,
-   flip the few cells where the picture disagrees with that rival and re-check.
-   This converges to a *unique* solution in 1–3 rounds.
-4. Keep the puzzle only if its difficulty (how much lookahead a human needs,
-   estimated from the solver's search) is **Easy, Medium, or Hard** — trivial
-   puzzles are redrawn.
+3. **Vet** the clues with an exhaustive solver. If a rival solution exists,
+   flip up to three differing cells, recompute the clues, and re-check. This
+   is a heuristic: it can create new rivals and need not converge.
+4. Accept only after an untruncated, non-timed-out solve verifies the requested
+   solution count, the intended picture is among those solutions, and fill
+   ratio and difficulty filters pass. Otherwise retry within the attempt budget.
 
-The result: a puzzle that is provably unique, fun to solve, and reproducible by
-its seed.
+The browser requests exactly one solution, 35–65% filled cells, and difficulty
+between the selected minimum and Hard. Difficulty uses search-node counts and
+grid size; pure line-solving percentage is reported separately. Seeds reproduce
+the random sequence, but machine speed and time cutoffs can change which
+candidate is accepted. Generation currently runs synchronously and may pause
+the page while searching; the time budgets are approximate.
 
 ## Files
 
@@ -44,6 +49,12 @@ its seed.
 | `core.js` | Shared grid/clue helpers (BigInt bitmasks) |
 | `generator.js` | Picture → clues → uniqueness proof → difficulty filter |
 | `solver.js` | Exhaustive all-solutions solver (the "vet" step) |
+| `tests.js` | Parser, exhaustive small-grid, generation and bundle regressions |
+| `PROJECT_STATUS.md` | Checked behavior and outstanding work |
+| `puzzles/` | Local CLI output; ignored by Git |
+
+The browser entry point and its small set of source files intentionally stay
+together. `bundle.js` is committed so opening the page needs no installation.
 
 ## CLI
 
@@ -57,6 +68,13 @@ node generator.js --size 12 --min-difficulty Medium   # only Medium+
 ```
 
 Generated puzzles are printed and saved as JSON under `puzzles/` (gitignored).
+The CLI accepts rectangular sizes too, such as `--size 15x10`. Its default
+minimum difficulty is Trivial when either dimension is below 10, otherwise
+Easy; its maximum is Hard. `--max-solutions N` explicitly allows up to N
+solutions. A failed search prints a message and produces no puzzle file.
+
+Solve a saved puzzle with `node solver.js puzzles/puzzle-15x15-s42.json`.
+Solver counts are exact only if neither `truncated` nor `timedOut` is set.
 
 ## Regenerating the bundle
 
@@ -65,4 +83,10 @@ bundle and commit it:
 
 ```bash
 node build.js
+npm test
 ```
+
+Tests require Node.js 18 or newer and no third-party packages. `npm test` checks
+that the committed bundle matches the sources before running the regressions.
+It executes the bundle in an isolated JavaScript context without Node globals;
+this is not a full browser interaction test.
